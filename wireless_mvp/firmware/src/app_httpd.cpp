@@ -49,6 +49,12 @@ static const char *_STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %
 
 httpd_handle_t stream_httpd = NULL;
 httpd_handle_t camera_httpd = NULL;
+static volatile bool upload_in_progress = false;
+
+extern bool consume_physical_capture_request();
+bool capture_upload_in_progress() {
+  return upload_in_progress;
+}
 
 typedef struct {
   size_t size;   //number of values used for filtering
@@ -154,6 +160,18 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
   return len;
 }
 
+camera_fb_t *capture_image() {
+#if defined(LED_GPIO_NUM)
+  enable_led(true);
+  vTaskDelay(150 / portTICK_PERIOD_MS);
+  camera_fb_t *fb = esp_camera_fb_get();
+  enable_led(false);
+  return fb;
+#else
+  return esp_camera_fb_get();
+#endif
+}
+
 static esp_err_t capture_handler(httpd_req_t *req) {
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
@@ -161,14 +179,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
   int64_t fr_start = esp_timer_get_time();
 #endif
 
-#if defined(LED_GPIO_NUM)
-  enable_led(true);
-  vTaskDelay(150 / portTICK_PERIOD_MS);  // The LED needs to be turned on ~150ms before the call to esp_camera_fb_get()
-  fb = esp_camera_fb_get();              // or it won't be visible in the frame. A better way to do this is needed.
-  enable_led(false);
-#else
-  fb = esp_camera_fb_get();
-#endif
+  fb = capture_image();
 
   if (!fb) {
     log_e("Camera capture failed");
@@ -227,6 +238,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   }
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   httpd_resp_set_hdr(req, "X-Framerate", "60");
 
 #if defined(LED_GPIO_NUM)
@@ -698,13 +710,15 @@ struct UploadJobParams {
 static void upload_job_task(void *pv) {
   UploadJobParams *params = (UploadJobParams *)pv;
 
-  camera_fb_t *fb = esp_camera_fb_get();
+  camera_fb_t *fb = capture_image();
   if (!fb) {
-    log_e("Camera capture failed for job %s", params->job_id);
+    Serial.println("Capture failed");
+    upload_in_progress = false;
     free(params);
     vTaskDelete(NULL);
     return;
   }
+  Serial.println("Image captured");
 
   // The sensor doesn't always hand back a JPEG buffer directly (see stream_handler's
   // identical check) so convert if needed instead of uploading raw pixel data as "jpeg".
@@ -736,6 +750,7 @@ static void upload_job_task(void *pv) {
   uint8_t *body = (uint8_t *)malloc(total_len);
   if (!body) {
     log_e("Out of memory building multipart body (%u bytes)", (unsigned)total_len);
+    Serial.println("Image upload failed: out of memory");
   } else {
     memcpy(body, head.c_str(), head.length());
     memcpy(body + head.length(), jpg_buf, jpg_len);
@@ -747,8 +762,10 @@ static void upload_job_task(void *pv) {
     int status = http.POST(body, total_len);
     if (status < 200 || status >= 300) {
       log_e("Upload to %s failed, HTTP status %d: %s", url.c_str(), status, http.getString().c_str());
+      Serial.println("Image upload failed");
     } else {
       log_i("Uploaded job %s to backend (HTTP %d)", params->job_id, status);
+      Serial.println("Image upload successful");
     }
     http.end();
     free(body);
@@ -758,6 +775,7 @@ static void upload_job_task(void *pv) {
     free((void *)jpg_buf);
   }
   esp_camera_fb_return(fb);
+  upload_in_progress = false;
   free(params);
   vTaskDelete(NULL);
 }
@@ -768,6 +786,7 @@ static esp_err_t upload_job_handler(httpd_req_t *req) {
   char backend_url_raw[192] = {0};
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
   httpd_resp_set_type(req, "application/json");
 
   bool have_query = parse_get(req, &buf) == ESP_OK;
@@ -782,6 +801,11 @@ static esp_err_t upload_job_handler(httpd_req_t *req) {
     return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"missing job_id or backend_url\"}", HTTPD_RESP_USE_STRLEN);
   }
 
+  if (upload_in_progress) {
+    httpd_resp_set_status(req, "409 Conflict");
+    return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"capture already in progress\"}", HTTPD_RESP_USE_STRLEN);
+  }
+
   UploadJobParams *params = (UploadJobParams *)malloc(sizeof(UploadJobParams));
   if (!params) {
     httpd_resp_set_status(req, "500 Internal Server Error");
@@ -790,14 +814,32 @@ static esp_err_t upload_job_handler(httpd_req_t *req) {
   strlcpy(params->job_id, job_id, sizeof(params->job_id));
   url_decode(backend_url_raw, params->backend_url, sizeof(params->backend_url));
 
+  upload_in_progress = true;
   BaseType_t created = xTaskCreatePinnedToCore(upload_job_task, "upload_job", 8192, params, 1, NULL, 1);
   if (created != pdPASS) {
+    upload_in_progress = false;
     free(params);
     httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"could not start upload task\"}", HTTPD_RESP_USE_STRLEN);
   }
 
   return httpd_resp_send(req, "{\"status\":\"queued\"}", HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t button_event_handler(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+  const bool requested = consume_physical_capture_request();
+  const char *response = requested ? "{\"capture_requested\":true}" : "{\"capture_requested\":false}";
+  return httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t cors_options_handler(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
+  return httpd_resp_send(req, NULL, 0);
 }
 
 void startCameraServer() {
@@ -870,6 +912,32 @@ void startCameraServer() {
 #endif
   };
 
+  httpd_uri_t button_event_uri = {
+    .uri = "/button_event",
+    .method = HTTP_GET,
+    .handler = button_event_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = false,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
+  httpd_uri_t upload_job_options_uri = {
+    .uri = "/upload_job",
+    .method = HTTP_OPTIONS,
+    .handler = cors_options_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = false,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
   httpd_uri_t stream_uri = {
     .uri = "/stream",
     .method = HTTP_GET,
@@ -878,6 +946,19 @@ void startCameraServer() {
 #ifdef CONFIG_HTTPD_WS_SUPPORT
     ,
     .is_websocket = true,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
+  httpd_uri_t stream_options_uri = {
+    .uri = "/stream",
+    .method = HTTP_OPTIONS,
+    .handler = cors_options_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = false,
     .handle_ws_control_frames = false,
     .supported_subprotocol = NULL
 #endif
@@ -970,6 +1051,8 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &status_uri);
     httpd_register_uri_handler(camera_httpd, &capture_uri);
     httpd_register_uri_handler(camera_httpd, &upload_job_uri);
+    httpd_register_uri_handler(camera_httpd, &button_event_uri);
+    httpd_register_uri_handler(camera_httpd, &upload_job_options_uri);
     httpd_register_uri_handler(camera_httpd, &bmp_uri);
 
     httpd_register_uri_handler(camera_httpd, &xclk_uri);
@@ -984,6 +1067,7 @@ void startCameraServer() {
   log_i("Starting stream server on port: '%d'", config.server_port);
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &stream_uri);
+    httpd_register_uri_handler(stream_httpd, &stream_options_uri);
   }
 }
 

@@ -28,11 +28,48 @@
 
 #include "camera_pins.h"
 
+constexpr uint8_t CAPTURE_BUTTON_GPIO = 21;
+constexpr uint32_t CAPTURE_BUTTON_DEBOUNCE_MS = 50;
+
+volatile bool physical_capture_requested = false;
+portMUX_TYPE capture_button_mux = portMUX_INITIALIZER_UNLOCKED;
+bool capture_upload_in_progress();
+
+bool consume_physical_capture_request() {
+  portENTER_CRITICAL(&capture_button_mux);
+  const bool requested = physical_capture_requested;
+  physical_capture_requested = false;
+  portEXIT_CRITICAL(&capture_button_mux);
+  return requested;
+}
+
+void check_capture_button() {
+  static int last_button_state = HIGH;
+  static uint32_t last_press_ms = 0;
+  const int button_state = digitalRead(CAPTURE_BUTTON_GPIO);
+
+  if (last_button_state == HIGH && button_state == LOW) {
+    const uint32_t now = millis();
+    if (now - last_press_ms >= CAPTURE_BUTTON_DEBOUNCE_MS) {
+      last_press_ms = now;
+      Serial.println("Physical capture button pressed");
+      if (capture_upload_in_progress()) {
+        Serial.println("Capture already in progress");
+      } else {
+        portENTER_CRITICAL(&capture_button_mux);
+        physical_capture_requested = true;
+        portEXIT_CRITICAL(&capture_button_mux);
+      }
+    }
+  }
+  last_button_state = button_state;
+}
+
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-const char* ssid     = "CIK1000";
-const char* password = "Wmjy2gnh@20072009";
+const char* ssid     = "iPhone (2)";
+const char* password = "JamesJin";
 const char* ap_ssid = "ESP32-Camera";
 const char* ap_password = "camera123";
 camera_config_t config;
@@ -44,6 +81,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   delay(2000);
+  pinMode(21, INPUT_PULLUP);
   Serial.println();
   Serial.println("ESP32 camera firmware starting...");
 
@@ -93,8 +131,8 @@ void setup() {
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  check_capture_button();
+  delay(10);
 }
 
 bool camera_init() {
