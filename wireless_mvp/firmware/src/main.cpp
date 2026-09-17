@@ -68,8 +68,8 @@ void check_capture_button() {
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-const char* ssid     = "iPhone (2)";
-const char* password = "JamesJin";
+const char* ssid     = "CIK1000";
+const char* password = "Wmjy2gnh@20072009";
 const char* ap_ssid = "ESP32-Camera";
 const char* ap_password = "camera123";
 camera_config_t config;
