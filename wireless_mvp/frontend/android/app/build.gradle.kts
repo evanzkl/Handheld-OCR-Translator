@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.wireless_mvp_frontend"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
