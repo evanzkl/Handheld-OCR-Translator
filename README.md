@@ -1,1 +1,1 @@
-# LENA
+# Handheld-OCR-Translator
