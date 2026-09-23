@@ -162,6 +162,8 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
 
 // Stills (used for OCR/translation) must stay high resolution regardless of
 // whatever lower framesize the live /stream is currently using for FPS.
+// Must match main.cpp's camera_init() config.frame_size (the driver's buffers
+// are sized for that value at init; sizing up past it here would overflow them).
 static const framesize_t CAPTURE_FRAMESIZE = FRAMESIZE_UXGA;
 
 camera_fb_t *capture_image() {

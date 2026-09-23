@@ -157,7 +157,12 @@ bool camera_init() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
-  config.frame_size = FRAMESIZE_QVGA;
+  // Init at the highest resolution stills ever need (must match app_httpd.cpp's
+  // CAPTURE_FRAMESIZE) so the driver's frame buffers are large enough; the
+  // sensor is then dropped to QVGA below for the live stream. Sizing UP past
+  // whatever framesize was used at init overflows those buffers and corrupts
+  // the JPEG, so runtime resizes must only ever go up to this init value.
+  config.frame_size = FRAMESIZE_UXGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   // GRAB_LATEST + fb_count=2 lets the live /stream and the /upload_job capture
   // grab frames concurrently; fb_count=1 starves one of them and can stall
@@ -218,5 +223,8 @@ bool camera_init() {
   s->set_brightness(s, 1);  // Slightly increase brightness
   s->set_saturation(s, 0);  // Reduce saturation
   s->set_ae_level(s, -3);   // Set exposure compensation level
+  // Buffers are sized for FRAMESIZE_UXGA above; this only shrinks the active
+  // frame within them, so it's safe (unlike sizing up at runtime).
+  s->set_framesize(s, FRAMESIZE_QVGA);
   return true;
 }
