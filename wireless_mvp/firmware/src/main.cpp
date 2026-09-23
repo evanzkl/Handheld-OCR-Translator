@@ -157,7 +157,7 @@ bool camera_init() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
-  config.frame_size = FRAMESIZE_VGA;
+  config.frame_size = FRAMESIZE_QVGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   // GRAB_LATEST + fb_count=2 lets the live /stream and the /upload_job capture
   // grab frames concurrently; fb_count=1 starves one of them and can stall

@@ -160,16 +160,36 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
   return len;
 }
 
+// Stills (used for OCR/translation) must stay high resolution regardless of
+// whatever lower framesize the live /stream is currently using for FPS.
+static const framesize_t CAPTURE_FRAMESIZE = FRAMESIZE_UXGA;
+
 camera_fb_t *capture_image() {
+  sensor_t *s = esp_camera_sensor_get();
+  framesize_t original_size = s ? (framesize_t)s->status.framesize : FRAMESIZE_INVALID;
+  bool switched = s && original_size != CAPTURE_FRAMESIZE;
+  if (switched) {
+    s->set_framesize(s, CAPTURE_FRAMESIZE);
+    // The frame already in flight when we switched is still the old resolution; drop it.
+    camera_fb_t *stale = esp_camera_fb_get();
+    if (stale) {
+      esp_camera_fb_return(stale);
+    }
+  }
+
 #if defined(LED_GPIO_NUM)
   enable_led(true);
   vTaskDelay(150 / portTICK_PERIOD_MS);
   camera_fb_t *fb = esp_camera_fb_get();
   enable_led(false);
-  return fb;
 #else
-  return esp_camera_fb_get();
+  camera_fb_t *fb = esp_camera_fb_get();
 #endif
+
+  if (switched) {
+    s->set_framesize(s, original_size);
+  }
+  return fb;
 }
 
 static esp_err_t capture_handler(httpd_req_t *req) {
