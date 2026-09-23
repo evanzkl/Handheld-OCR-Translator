@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 
 /// Raised when the ESP32 is unreachable or returns a non-2xx response.
@@ -13,8 +15,10 @@ class Esp32Exception implements Exception {
 /// Thin client for the Freenove ESP32-S3 CameraWebServer firmware
 /// (see PlatformIO ESP32 project, src/app_httpd.cpp):
 ///   GET :81/stream               -> MJPEG live view (consumed directly by Flutter)
-///   GET /upload_job?job_id=..&backend_url=.. -> ESP32 captures a JPEG and uploads
-///                                                it directly to the FastAPI job.
+///   GET /upload_job?job_id=..&backend_url=.. -> ESP32 captures a single JPEG,
+///                                                returns those same bytes as this
+///                                                response, and separately uploads
+///                                                them to the FastAPI job.
 class Esp32Client {
   Esp32Client({required String baseUrl}) : baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), '');
 
@@ -35,9 +39,10 @@ class Esp32Client {
     return response.body.contains('"capture_requested":true');
   }
 
-  /// Tells the ESP32 to capture a still image and upload it directly to the
-  /// backend job. The ESP32 performs the upload itself; Flutter never sees the bytes.
-  Future<void> triggerCapture({required String jobId, required String backendBaseUrl}) async {
+  /// Tells the ESP32 to capture a still image. It uploads that same JPEG to
+  /// the backend job itself, and returns the identical bytes here so Flutter
+  /// can display the actual captured still (not just the last live frame).
+  Future<Uint8List> triggerCapture({required String jobId, required String backendBaseUrl}) async {
     final uri = Uri.parse('$baseUrl/upload_job').replace(queryParameters: {
       'job_id': jobId,
       'backend_url': backendBaseUrl,
@@ -51,5 +56,6 @@ class Esp32Client {
     if (response.statusCode != 200) {
       throw Esp32Exception('ESP32 capture failed (HTTP ${response.statusCode}): ${response.body}');
     }
+    return response.bodyBytes;
   }
 }

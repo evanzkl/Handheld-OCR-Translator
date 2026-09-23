@@ -180,6 +180,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _processing = true;
       _frozenBytes = _pickedBytes;
       _errorMessage = null;
+      _result = null;
+      _resultImageBytes = null;
     });
     try {
       final result = await _client.processImage(
@@ -222,16 +224,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     setState(() {
       _processing = true;
-      _frozenBytes = _lastLiveFrame;
+      _frozenBytes = _lastLiveFrame; // instant placeholder until the real captured still arrives below
       _errorMessage = null;
       _result = null;
+      _resultImageBytes = null;
     });
     try {
       final jobId = await _client.createJob(
         sourceLang: _sourceLanguage!.displayName,
         targetLang: _targetLanguage!.displayName,
       );
-      await Esp32Client(baseUrl: esp32Url).triggerCapture(jobId: jobId, backendBaseUrl: backendUrl);
+      final capturedBytes =
+          await Esp32Client(baseUrl: esp32Url).triggerCapture(jobId: jobId, backendBaseUrl: backendUrl);
+      if (mounted) {
+        // Show the actual high-quality still the ESP32 also sent to the backend,
+        // replacing the temporary last-live-frame placeholder set above.
+        setState(() => _frozenBytes = capturedBytes);
+      }
 
       JobStatus status;
       do {

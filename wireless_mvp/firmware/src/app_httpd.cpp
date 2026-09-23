@@ -698,63 +698,37 @@ static void url_decode(const char *src, char *dst, size_t dst_size) {
   dst[di] = '\0';
 }
 
-// Captures a still image and uploads it directly to the FastAPI job endpoint
-// (the ESP32 performs the upload; Flutter only triggers this call).
+// Captures a still image once, sends it straight back to Flutter as this
+// request's response, and hands an independent copy to a background task
+// that uploads the SAME bytes to the FastAPI job endpoint.
 struct UploadJobParams {
   char job_id[64];
   char backend_url[192];
+  uint8_t *jpg_buf;  // heap copy owned by the task; freed when it finishes
+  size_t jpg_len;
 };
 
 // Runs on its own task so the slow outbound POST never blocks the httpd worker,
 // which would otherwise stall /stream and /capture for other clients meanwhile.
+// The capture itself already happened in upload_job_handler; this task only
+// owns the network upload of the bytes it was handed.
 static void upload_job_task(void *pv) {
   UploadJobParams *params = (UploadJobParams *)pv;
-
-  camera_fb_t *fb = capture_image();
-  if (!fb) {
-    Serial.println("Capture failed");
-    upload_in_progress = false;
-    free(params);
-    vTaskDelete(NULL);
-    return;
-  }
-  Serial.println("Image captured");
-
-  // The sensor doesn't always hand back a JPEG buffer directly (see stream_handler's
-  // identical check) so convert if needed instead of uploading raw pixel data as "jpeg".
-  const uint8_t *jpg_buf = fb->buf;
-  size_t jpg_len = fb->len;
-  bool jpg_converted = false;
-  if (fb->format != PIXFORMAT_JPEG) {
-    uint8_t *converted_buf = NULL;
-    size_t converted_len = 0;
-    jpg_converted = frame2jpg(fb, 80, &converted_buf, &converted_len);
-    if (!jpg_converted) {
-      log_e("JPEG compression failed for job %s", params->job_id);
-      esp_camera_fb_return(fb);
-      free(params);
-      vTaskDelete(NULL);
-      return;
-    }
-    jpg_buf = converted_buf;
-    jpg_len = converted_len;
-  }
-  log_i("Captured job %s: %u bytes, format %d", params->job_id, (unsigned)jpg_len, (int)fb->format);
 
   String url = String(params->backend_url) + "/api/v1/jobs/" + String(params->job_id) + "/upload";
   String boundary = "----esp32boundary7d21a";
   String head = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"capture.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
   String tail = "\r\n--" + boundary + "--\r\n";
 
-  size_t total_len = head.length() + jpg_len + tail.length();
+  size_t total_len = head.length() + params->jpg_len + tail.length();
   uint8_t *body = (uint8_t *)malloc(total_len);
   if (!body) {
     log_e("Out of memory building multipart body (%u bytes)", (unsigned)total_len);
     Serial.println("Image upload failed: out of memory");
   } else {
     memcpy(body, head.c_str(), head.length());
-    memcpy(body + head.length(), jpg_buf, jpg_len);
-    memcpy(body + head.length() + jpg_len, tail.c_str(), tail.length());
+    memcpy(body + head.length(), params->jpg_buf, params->jpg_len);
+    memcpy(body + head.length() + params->jpg_len, tail.c_str(), tail.length());
 
     HTTPClient http;
     http.begin(url);
@@ -771,10 +745,7 @@ static void upload_job_task(void *pv) {
     free(body);
   }
 
-  if (jpg_converted) {
-    free((void *)jpg_buf);
-  }
-  esp_camera_fb_return(fb);
+  free(params->jpg_buf);
   upload_in_progress = false;
   free(params);
   vTaskDelete(NULL);
@@ -787,7 +758,6 @@ static esp_err_t upload_job_handler(httpd_req_t *req) {
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Private-Network", "true");
-  httpd_resp_set_type(req, "application/json");
 
   bool have_query = parse_get(req, &buf) == ESP_OK;
   bool has_job = have_query && httpd_query_key_value(buf, "job_id", job_id, sizeof(job_id)) == ESP_OK;
@@ -797,33 +767,86 @@ static esp_err_t upload_job_handler(httpd_req_t *req) {
   }
 
   if (!has_job || !has_backend) {
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, "400 Bad Request");
     return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"missing job_id or backend_url\"}", HTTPD_RESP_USE_STRLEN);
   }
 
   if (upload_in_progress) {
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, "409 Conflict");
     return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"capture already in progress\"}", HTTPD_RESP_USE_STRLEN);
   }
+  upload_in_progress = true;
+
+  camera_fb_t *fb = capture_image();
+  if (!fb) {
+    upload_in_progress = false;
+    log_e("Capture failed for job %s", job_id);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"camera capture failed\"}", HTTPD_RESP_USE_STRLEN);
+  }
+
+  // The sensor doesn't always hand back a JPEG buffer directly (see stream_handler's
+  // identical check) so convert if needed instead of returning raw pixel data as "jpeg".
+  const uint8_t *jpg_buf = fb->buf;
+  size_t jpg_len = fb->len;
+  uint8_t *converted_buf = NULL;
+  if (fb->format != PIXFORMAT_JPEG) {
+    size_t converted_len = 0;
+    if (!frame2jpg(fb, 80, &converted_buf, &converted_len)) {
+      esp_camera_fb_return(fb);
+      upload_in_progress = false;
+      log_e("JPEG compression failed for job %s", job_id);
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_set_status(req, "500 Internal Server Error");
+      return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"jpeg conversion failed\"}", HTTPD_RESP_USE_STRLEN);
+    }
+    jpg_buf = converted_buf;
+    jpg_len = converted_len;
+  }
+  log_i("Captured job %s: %u bytes, format %d", job_id, (unsigned)jpg_len, (int)fb->format);
 
   UploadJobParams *params = (UploadJobParams *)malloc(sizeof(UploadJobParams));
-  if (!params) {
+  uint8_t *backend_copy = params ? (uint8_t *)malloc(jpg_len) : NULL;
+  if (!params || !backend_copy) {
+    free(params);
+    free(backend_copy);
+    if (converted_buf) {
+      free(converted_buf);
+    }
+    esp_camera_fb_return(fb);
+    upload_in_progress = false;
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_set_status(req, "500 Internal Server Error");
     return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"out of memory\"}", HTTPD_RESP_USE_STRLEN);
   }
+  memcpy(backend_copy, jpg_buf, jpg_len);
   strlcpy(params->job_id, job_id, sizeof(params->job_id));
   url_decode(backend_url_raw, params->backend_url, sizeof(params->backend_url));
+  params->jpg_buf = backend_copy;
+  params->jpg_len = jpg_len;
 
-  upload_in_progress = true;
+  // Same JPEG bytes go to Flutter as this response, and to the backend via the task below.
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=capture.jpg");
+  esp_err_t res = httpd_resp_send(req, (const char *)jpg_buf, jpg_len);
+
+  if (converted_buf) {
+    free(converted_buf);
+  }
+  esp_camera_fb_return(fb);
+
   BaseType_t created = xTaskCreatePinnedToCore(upload_job_task, "upload_job", 8192, params, 1, NULL, 1);
   if (created != pdPASS) {
-    upload_in_progress = false;
+    log_e("Could not start background upload task for job %s", job_id);
+    free(backend_copy);
     free(params);
-    httpd_resp_set_status(req, "500 Internal Server Error");
-    return httpd_resp_send(req, "{\"status\":\"error\",\"message\":\"could not start upload task\"}", HTTPD_RESP_USE_STRLEN);
+    upload_in_progress = false;
   }
 
-  return httpd_resp_send(req, "{\"status\":\"queued\"}", HTTPD_RESP_USE_STRLEN);
+  return res;
 }
 
 static esp_err_t button_event_handler(httpd_req_t *req) {
