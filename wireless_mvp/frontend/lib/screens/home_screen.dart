@@ -40,6 +40,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Uint8List? _lastLiveFrame;
   Uint8List? _frozenBytes;
 
+  /// Live-view FPS: frames are tallied in onFrame and the rate is recomputed
+  /// once per second (rather than on every frame) to avoid excess rebuilds.
+  int _liveFrameCount = 0;
+  double _liveFps = 0;
+  Timer? _fpsTimer;
+
   List<Language> _languages = [];
   Language? _sourceLanguage;
   Language? _targetLanguage;
@@ -57,12 +63,19 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadLanguages();
     _buttonPollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _pollPhysicalButton());
+    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      setState(() {
+        _liveFps = _liveFrameCount.toDouble();
+        _liveFrameCount = 0;
+      });
+    });
   }
 
   @override
   void dispose() {
     _backendUrlController.dispose();
     _esp32UrlController.dispose();
+    _fpsTimer?.cancel();
     _buttonPollTimer?.cancel();
     super.dispose();
   }
@@ -290,6 +303,8 @@ class _HomeScreenState extends State<HomeScreen> {
               Positioned(top: 8, left: 16, right: 16, child: _buildErrorBanner()),
             Positioned(left: 18, top: 18, child: _buildEyeToggle()),
             Positioned(right: 18, top: 18, child: CircleIconButton(icon: Icons.settings, onPressed: _openSettings)),
+            if (!showingResult && !_processing && _pickedBytes == null)
+              Positioned(left: 12, bottom: 12, child: _buildFpsBadge()),
             if (_uiVisible)
               Positioned(
                 top: 22,
@@ -299,6 +314,21 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Live-view frame rate, sampled once per second from the MJPEG stream.
+  Widget _buildFpsBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '${_liveFps.toStringAsFixed(0)} FPS',
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
       ),
     );
   }
@@ -324,7 +354,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     return MjpegView(
       streamUrl: Esp32Client(baseUrl: esp32Url).streamUrl,
-      onFrame: (frame) => _lastLiveFrame = frame,
+      onFrame: (frame) {
+        _lastLiveFrame = frame;
+        _liveFrameCount++;
+      },
     );
   }
 

@@ -23,7 +23,8 @@ try:
 except ImportError:  # Defensive fallback if auth extras are missing.
     ClientOptions = None
 
-DEFAULT_PROJECT_ID = "handheld-ocr-translator-503820"
+# DEFAULT_PROJECT_ID = "handheld-ocr-translator-503820"
+DEFAULT_PROJECT_ID = "handheld-ocr-translator"
 DEFAULT_LOCATION = "global"
 
 
