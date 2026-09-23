@@ -54,9 +54,17 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _pickedFilename;
 
   ProcessResult? _result;
+
+  /// Decoded once when _result is set, instead of on every rebuild, so
+  /// unrelated setState calls (e.g. the FPS timer) don't force Image.memory
+  /// to redecode a fresh byte array and flash the result image blank.
+  Uint8List? _resultImageBytes;
   bool _loadingLanguages = true;
   bool _processing = false;
   String? _errorMessage;
+
+  /// True while the live camera feed (rather than a frozen/result/picked image) is on screen.
+  bool get _isLiveViewActive => _result == null && !_processing && _pickedBytes == null;
 
   @override
   void initState() {
@@ -64,10 +72,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadLanguages();
     _buttonPollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _pollPhysicalButton());
     _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() {
-        _liveFps = _liveFrameCount.toDouble();
-        _liveFrameCount = 0;
-      });
+      final fps = _liveFrameCount.toDouble();
+      _liveFrameCount = 0;
+      // Skip setState entirely while a frozen/result/picked image is on screen so
+      // this timer never forces those images to rebuild and flash.
+      if (_isLiveViewActive) {
+        setState(() => _liveFps = fps);
+      }
     });
   }
 
@@ -177,7 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
         sourceLang: _sourceLanguage!.displayName,
         targetLang: _targetLanguage!.displayName,
       );
-      setState(() => _result = result);
+      setState(() {
+        _result = result;
+        _resultImageBytes = base64Decode(result.imageBase64);
+      });
     } catch (exc) {
       setState(() => _errorMessage = exc.toString());
     } finally {
@@ -226,7 +240,10 @@ class _HomeScreenState extends State<HomeScreen> {
       } while (status.status == 'pending');
 
       if (status.status == 'done' && status.result != null) {
-        setState(() => _result = status.result);
+        setState(() {
+          _result = status.result;
+          _resultImageBytes = base64Decode(status.result!.imageBase64);
+        });
       } else {
         setState(() => _errorMessage = status.error ?? 'ESP32 capture failed.');
       }
@@ -242,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _retake() {
     setState(() {
       _result = null;
+      _resultImageBytes = null;
       _pickedBytes = null;
       _pickedFilename = null;
       _frozenBytes = null;
@@ -303,8 +321,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Positioned(top: 8, left: 16, right: 16, child: _buildErrorBanner()),
             Positioned(left: 18, top: 18, child: _buildEyeToggle()),
             Positioned(right: 18, top: 18, child: CircleIconButton(icon: Icons.settings, onPressed: _openSettings)),
-            if (!showingResult && !_processing && _pickedBytes == null)
-              Positioned(left: 12, bottom: 12, child: _buildFpsBadge()),
+            if (_isLiveViewActive) Positioned(left: 12, bottom: 12, child: _buildFpsBadge()),
             if (_uiVisible)
               Positioned(
                 top: 22,
@@ -334,14 +351,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBackground() {
-    if (_result != null) {
-      return Image.memory(base64Decode(_result!.imageBase64), fit: BoxFit.contain);
+    if (_resultImageBytes != null) {
+      return Image.memory(_resultImageBytes!, fit: BoxFit.contain, gaplessPlayback: true);
     }
     if (_processing) {
       return _buildFrozenOverlay(_frozenBytes);
     }
     if (_pickedBytes != null) {
-      return Image.memory(_pickedBytes!, fit: BoxFit.contain);
+      return Image.memory(_pickedBytes!, fit: BoxFit.contain, gaplessPlayback: true);
     }
     final esp32Url = _esp32UrlController.text.trim();
     if (esp32Url.isEmpty) {
@@ -367,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (bytes != null) Image.memory(bytes, fit: BoxFit.contain) else Container(color: Colors.grey.shade900),
+        if (bytes != null) Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true) else Container(color: Colors.grey.shade900),
         Container(color: Colors.black.withValues(alpha: 0.45)),
         const Center(
           child: Text(
