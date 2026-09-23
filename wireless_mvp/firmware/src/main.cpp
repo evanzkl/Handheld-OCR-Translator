@@ -162,7 +162,10 @@ bool camera_init() {
   // sensor is then dropped to QVGA below for the live stream. Sizing UP past
   // whatever framesize was used at init overflows those buffers and corrupts
   // the JPEG, so runtime resizes must only ever go up to this init value.
-  config.frame_size = FRAMESIZE_UXGA;
+  // NOTE: FRAMESIZE_UXGA crashes here (this OV2640 rejects JPEG at that size
+  // on this board/clock, then a buggy RGB565 fallback corrupts the DMA buffer
+  // and panics); SVGA is the largest size that reliably inits in JPEG mode.
+  config.frame_size = FRAMESIZE_SVGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
   // GRAB_LATEST + fb_count=2 lets the live /stream and the /upload_job capture
   // grab frames concurrently; fb_count=1 starves one of them and can stall
