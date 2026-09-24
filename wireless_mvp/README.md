@@ -16,10 +16,10 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 another device) can reach it over the LAN. `--host 127.0.0.1` (uvicorn's
 default) is not reachable from anywhere except this machine.
 
-Requires the packages in `wireless_mvp/requirements.txt` and Google Cloud
-credentials available via Application Default Credentials
+Requires the packages in `wireless_mvp/backend/requirements.txt` and Google
+Cloud credentials available via Application Default Credentials
 (`GOOGLE_APPLICATION_CREDENTIALS`) or the `gcloud` CLI fallback used by
-`OCR/google_vision.py` / `translation/translator.py`.
+`backend/OCR/google_vision.py` / `backend/translation/translator.py`.
 
 ## Run the frontend
 
@@ -54,5 +54,6 @@ cd firmware
 & C:\Users\<you>\.platformio\penv\Scripts\platformio.exe run --target upload
 ```
 
-`firmware/src/main.cpp` currently has the WiFi SSID/password hardcoded for
-testing. Treat that file as containing a local secret before sharing it.
+`firmware/src/main.cpp` reads WiFi/AP credentials from `firmware/include/wifi_credentials.h`,
+which is gitignored. Copy `firmware/include/wifi_credentials.example.h` to
+`wifi_credentials.h` and fill in your own SSID/password before building.

@@ -23,7 +23,7 @@ try:
 except ImportError:
     ClientOptions = None
 
-from translation.translator import DEFAULT_PROJECT_ID
+from ..translation.translator import DEFAULT_PROJECT_ID
 
 
 class TextRegion(NamedTuple):

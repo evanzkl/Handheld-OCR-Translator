@@ -7,6 +7,7 @@
 #include "esp_camera.h"
 #include <WiFi.h>
 #include "board_config.h"
+#include "wifi_credentials.h"
 #include <Arduino.h>
 // ===================
 // Select camera model
@@ -65,15 +66,11 @@ void check_capture_button() {
   last_button_state = button_state;
 }
 
-// ===========================
-// Enter your WiFi credentials
-// ===========================
-// const char* ssid     = "CIK1000";
-const char* ssid     = "femos";
-// const char* password = "Wmjy2gnh@20072009";
-const char* password = "logicfun";
-const char* ap_ssid = "ESP32-Camera";
-const char* ap_password = "camera123";
+// WiFi/AP credentials live in wifi_credentials.h (gitignored, not in source control).
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
+const char* ap_ssid = AP_SSID;
+const char* ap_password = AP_PASSWORD;
 camera_config_t config;
 
 void startCameraServer();
@@ -115,7 +112,7 @@ void setup() {
     startCameraServer();
     Serial.print("Connect to WiFi network '" );
     Serial.print(ap_ssid);
-    Serial.println("' with password 'camera123'");
+    Serial.println("' with password '" AP_PASSWORD "'");
     Serial.print("Camera Ready! Use 'http://");
     Serial.print(WiFi.softAPIP());
     Serial.println("' to connect");

@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Real WiFi/AP credentials - copy include/wifi_credentials.example.h to fill these in locally.
+include/wifi_credentials.h

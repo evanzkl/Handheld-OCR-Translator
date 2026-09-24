@@ -5,9 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from OCR.google_vision import build_vision_engine, run_google_vision_ocr_array
-from translation.translator import translate_texts
-from blur_and_overlay.processor import overlay_text, remove_text_from_regions
+from ..OCR.google_vision import build_vision_engine, run_google_vision_ocr_array
+from ..translation.translator import translate_texts
+from ..blur_and_overlay.processor import overlay_text, remove_text_from_regions
 
 
 def _region_bounds(region) -> tuple[float, float, float, float]:

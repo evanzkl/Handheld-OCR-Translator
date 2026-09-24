@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import base64
-import sys
 import threading
 import time
 import uuid
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -13,15 +11,11 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-# Make the existing wireless_mvp packages (gui, OCR, translation, blur_and_overlay) importable.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from gui.languages import LANGUAGES, language_by_display_name  # noqa: E402
-from gui.pipeline import TranslationPipeline  # noqa: E402
-from OCR.google_vision import warm_up_engine  # noqa: E402
-from translation.translator import warm_up_client  # noqa: E402
-
-from .schemas import (  # noqa: E402
+from .gui.languages import LANGUAGES, language_by_display_name
+from .gui.pipeline import TranslationPipeline
+from .OCR.google_vision import warm_up_engine
+from .translation.translator import warm_up_client
+from .schemas import (
     JobCreateRequest,
     JobCreateResponse,
     JobStatusResponse,

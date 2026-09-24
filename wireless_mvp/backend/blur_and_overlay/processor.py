@@ -49,15 +49,45 @@ def _bgr_to_rgb(color: tuple[int, int, int]) -> tuple[int, int, int]:
     return (color[2], color[1], color[0])
 
 
-@lru_cache(maxsize=128)
-def _load_arial_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Load Arial when available, falling back to common sans-serif fonts."""
-    font_candidates = [
-        "arial.ttf",
-        "Arial.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "DejaVuSans.ttf",
-    ]
+# Arial/DejaVu only cover Latin-ish scripts, so non-Latin translations need a
+# font that actually has glyphs for them, or PIL silently draws tofu boxes.
+_SCRIPT_FONT_CANDIDATES: dict[str, list[str]] = {
+    "han": ["msyh.ttc", "C:/Windows/Fonts/msyh.ttc", "simsun.ttc", "C:/Windows/Fonts/simsun.ttc"],
+    "kana": ["YuGothR.ttc", "C:/Windows/Fonts/YuGothR.ttc", "msgothic.ttc", "C:/Windows/Fonts/msgothic.ttc"],
+    "hangul": ["malgun.ttf", "C:/Windows/Fonts/malgun.ttf"],
+    "arabic": ["tahoma.ttf", "C:/Windows/Fonts/tahoma.ttf"],
+    "devanagari": ["Nirmala.ttc", "C:/Windows/Fonts/Nirmala.ttc"],
+}
+
+_DEFAULT_FONT_CANDIDATES = [
+    "arial.ttf",
+    "Arial.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "DejaVuSans.ttf",
+]
+
+
+def _detect_script(text: str) -> str:
+    """Return a key into _SCRIPT_FONT_CANDIDATES for the first non-Latin script found in *text*."""
+    for ch in text:
+        code = ord(ch)
+        if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF:  # CJK Unified Ideographs
+            return "han"
+        if 0x3040 <= code <= 0x30FF:  # Hiragana / Katakana
+            return "kana"
+        if 0xAC00 <= code <= 0xD7A3:  # Hangul syllables
+            return "hangul"
+        if 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:  # Arabic
+            return "arabic"
+        if 0x0900 <= code <= 0x097F:  # Devanagari (Hindi)
+            return "devanagari"
+    return "latin"
+
+
+@lru_cache(maxsize=256)
+def _load_font(size: int, script: str) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Load a font covering *script*, falling back to Arial/DejaVu, then PIL's built-in default."""
+    font_candidates = _SCRIPT_FONT_CANDIDATES.get(script, []) + _DEFAULT_FONT_CANDIDATES
 
     for font_path in font_candidates:
         try:
@@ -91,6 +121,7 @@ def _fit_text_to_box(
     text: str,
     box_w: int,
     box_h: int,
+    script: str,
     max_lines: int = _MAX_LINES,
 ) -> tuple[list[str], int]:
     """
@@ -117,7 +148,7 @@ def _fit_text_to_box(
 
         while lo <= hi:
             mid = (lo + hi) // 2
-            font = _load_arial_font(mid)
+            font = _load_font(mid, script)
             line_spacing_px = max(1, int(mid * (_LINE_SPACING - 1)))
             max_w, total_h, _ = _measure_text_block(draw, lines, font, line_spacing_px)
 
@@ -198,14 +229,15 @@ def overlay_text(
     avail_w = max(box_w - 2 * padding, 1)
     avail_h = max(box_h - 2 * padding, 1)
 
-    lines, font_size = _fit_text_to_box(text, avail_w, avail_h)
+    script = _detect_script(text)
+    lines, font_size = _fit_text_to_box(text, avail_w, avail_h, script)
     if not lines:
         return image
 
-    font = _load_arial_font(font_size)
+    font = _load_font(font_size, script)
     text_rgb = _bgr_to_rgb(text_color)
 
-    # Draw with Pillow so we can use Arial.
+    # Draw with Pillow so the font matches the text's script (Arial/DejaVu can't render CJK/Arabic/Devanagari).
     pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(pil_image)
     line_spacing_px = max(1, int(font_size * (_LINE_SPACING - 1)))
