@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/job_status.dart';
 import '../models/language.dart';
@@ -28,6 +29,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Fallback defaults for a brand-new browser/laptop with nothing saved yet;
+  // overwritten by _restoreSavedUrls() below as soon as prior values are found.
+  static const _prefsKeyBackendUrl = 'backend_url';
+  static const _prefsKeyEsp32Url = 'esp32_url';
+
   BackendClient _client = BackendClient(baseUrl: 'http://localhost:8000');
   final _backendUrlController = TextEditingController(text: 'http://localhost:8000');
   final _esp32UrlController = TextEditingController(text: 'http://esp32cam.local');
@@ -69,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadLanguages();
+    _restoreSavedUrls();
     _buttonPollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _pollPhysicalButton());
     _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       final fps = _liveFrameCount.toDouble();
@@ -112,6 +118,29 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Loads whatever backend/ESP32 URLs this browser/laptop last saved (if any),
+  /// falling back to the hardcoded defaults on a brand-new machine, then fetches
+  /// languages from whichever backend URL ends up in effect.
+  Future<void> _restoreSavedUrls() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedBackendUrl = prefs.getString(_prefsKeyBackendUrl);
+    final savedEsp32Url = prefs.getString(_prefsKeyEsp32Url);
+    if (savedBackendUrl != null && savedBackendUrl.isNotEmpty) {
+      _backendUrlController.text = savedBackendUrl;
+      _client = BackendClient(baseUrl: savedBackendUrl);
+    }
+    if (savedEsp32Url != null && savedEsp32Url.isNotEmpty) {
+      _esp32UrlController.text = savedEsp32Url;
+    }
+    await _loadLanguages();
+  }
+
+  Future<void> _saveUrls() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsKeyBackendUrl, _backendUrlController.text.trim());
+    await prefs.setString(_prefsKeyEsp32Url, _esp32UrlController.text.trim());
+  }
+
   void _applyBackendUrl() {
     final url = _backendUrlController.text.trim();
     if (url.isEmpty) {
@@ -123,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _errorMessage = null;
     });
     _loadLanguages();
+    _saveUrls();
   }
 
   Future<void> _loadLanguages() async {
@@ -288,8 +318,8 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: _backendUrlController,
               decoration: const InputDecoration(
                 labelText: 'Backend URL (LAN-reachable)',
-                helperText: 'Use this computer\'s LAN IP, e.g. http://10.0.0.90:8000 (not localhost) so the ESP32 can reach it',
-                helperMaxLines: 2,
+                helperText: 'Use this computer\'s LAN IP, e.g. http://10.0.0.90:8000 (not localhost) so the ESP32 can reach it. Remembered on this browser after Apply.',
+                helperMaxLines: 3,
               ),
             ),
             const SizedBox(height: 12),
