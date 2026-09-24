@@ -160,26 +160,11 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
   return len;
 }
 
-// Stills (used for OCR/translation) must stay high resolution regardless of
-// whatever lower framesize the live /stream is currently using for FPS.
-// Must match main.cpp's camera_init() config.frame_size (the driver's buffers
-// are sized for that value at init; sizing up past it here would overflow them).
-// FRAMESIZE_UXGA is NOT safe here: this sensor/board rejects JPEG at that size.
-static const framesize_t CAPTURE_FRAMESIZE = FRAMESIZE_SVGA;
-
+// Stills (used for OCR/translation) and the live stream both run at a single
+// fixed VGA resolution set at init (main.cpp). Do NOT call set_framesize() at
+// runtime for any reason: this sensor crashes the moment it's called again
+// after init, even just to go down to QVGA - see main.cpp's camera_init().
 camera_fb_t *capture_image() {
-  sensor_t *s = esp_camera_sensor_get();
-  framesize_t original_size = s ? (framesize_t)s->status.framesize : FRAMESIZE_INVALID;
-  bool switched = s && original_size != CAPTURE_FRAMESIZE;
-  if (switched) {
-    s->set_framesize(s, CAPTURE_FRAMESIZE);
-    // The frame already in flight when we switched is still the old resolution; drop it.
-    camera_fb_t *stale = esp_camera_fb_get();
-    if (stale) {
-      esp_camera_fb_return(stale);
-    }
-  }
-
 #if defined(LED_GPIO_NUM)
   enable_led(true);
   vTaskDelay(150 / portTICK_PERIOD_MS);
@@ -188,10 +173,6 @@ camera_fb_t *capture_image() {
 #else
   camera_fb_t *fb = esp_camera_fb_get();
 #endif
-
-  if (switched) {
-    s->set_framesize(s, original_size);
-  }
   return fb;
 }
 
@@ -278,7 +259,11 @@ static esp_err_t stream_handler(httpd_req_t *req) {
       _timestamp.tv_sec = fb->timestamp.tv_sec;
       _timestamp.tv_usec = fb->timestamp.tv_usec;
       if (fb->format != PIXFORMAT_JPEG) {
-        bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+        // Lower quality than the still-capture encode (below): this software
+        // JPEG encode runs on every stream frame, so trading some live-view
+        // quality for encode speed is what actually restores smooth FPS here
+        // (resolution can't be lowered - see capture_image() above).
+        bool jpeg_converted = frame2jpg(fb, 10, &_jpg_buf, &_jpg_buf_len);
         esp_camera_fb_return(fb);
         fb = NULL;
         if (!jpeg_converted) {

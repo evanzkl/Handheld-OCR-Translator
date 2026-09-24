@@ -157,26 +157,36 @@ bool camera_init() {
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;
-  // Init at the highest resolution stills ever need (must match app_httpd.cpp's
-  // CAPTURE_FRAMESIZE) so the driver's frame buffers are large enough; the
-  // sensor is then dropped to QVGA below for the live stream. Sizing UP past
-  // whatever framesize was used at init overflows those buffers and corrupts
-  // the JPEG, so runtime resizes must only ever go up to this init value.
-  // NOTE: FRAMESIZE_UXGA crashes here (this OV2640 rejects JPEG at that size
-  // on this board/clock, then a buggy RGB565 fallback corrupts the DMA buffer
-  // and panics); SVGA is the largest size that reliably inits in JPEG mode.
-  config.frame_size = FRAMESIZE_SVGA;
+  // This sensor fails to negotiate hardware JPEG at boot (see retry loop below),
+  // so frames are actually captured as raw RGB565 and software-encoded to JPEG.
+  // In that fallback path the sensor/driver silently caps real output at VGA
+  // (640x480) no matter what higher frame_size is requested here - SVGA/UXGA
+  // build and boot fine but the delivered frame is still 640x480, so VGA is
+  // the actual achievable ceiling on this board right now, not just a choice.
+  config.frame_size = FRAMESIZE_VGA;
   config.pixel_format = PIXFORMAT_JPEG; // for streaming
-  // GRAB_LATEST + fb_count=2 lets the live /stream and the /upload_job capture
-  // grab frames concurrently; fb_count=1 starves one of them and can stall
-  // the camera driver badly enough to drop the streaming TCP connection.
   config.grab_mode = CAMERA_GRAB_LATEST;
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 10;
   config.fb_count = 2;
   
   // camera init
-  esp_err_t err = esp_camera_init(&config);
+  // "JPEG format is not supported on this sensor" happens consistently every
+  // boot on this board - the sensor never actually negotiates hardware JPEG -
+  // but esp_camera_init()'s RGB565 fallback then crashes unless preceded by a
+  // deinit+delay settle, hence the retry loop instead of a single attempt.
+  esp_err_t err = ESP_FAIL;
+  for (int attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) {
+      esp_camera_deinit();
+      delay(250);
+    }
+    err = esp_camera_init(&config);
+    if (err == ESP_OK) {
+      break;
+    }
+    Serial.printf("Camera init attempt %d failed with error 0x%x\n", attempt + 1, err);
+  }
   if (err != ESP_OK) {
     if (err == ESP_ERR_NOT_SUPPORTED) {
       // Some sensors cannot produce JPEG directly. Clean up before retrying
@@ -226,8 +236,10 @@ bool camera_init() {
   s->set_brightness(s, 1);  // Slightly increase brightness
   s->set_saturation(s, 0);  // Reduce saturation
   s->set_ae_level(s, -3);   // Set exposure compensation level
-  // Buffers are sized for FRAMESIZE_UXGA above; this only shrinks the active
-  // frame within them, so it's safe (unlike sizing up at runtime).
-  s->set_framesize(s, FRAMESIZE_QVGA);
+  // Do NOT call s->set_framesize() here or anywhere at runtime: this sensor
+  // crashes (Guru Meditation / FB-SIZE mismatch) the moment set_framesize() is
+  // called again after init, even just to go down to QVGA. Stream and capture
+  // must both stay fixed at the init resolution (VGA); see app_httpd.cpp for
+  // how live-view FPS is instead improved via JPEG quality, not resolution.
   return true;
 }
