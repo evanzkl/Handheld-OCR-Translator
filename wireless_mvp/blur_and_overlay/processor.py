@@ -239,6 +239,18 @@ def overlay_text(
     return image
 
 
+def remove_text_from_regions(
+    image: np.ndarray,
+    polygons: list[Polygon],
+    blur_kernel: int = 45,
+) -> np.ndarray:
+    """Blur every detected text region. Independent of translation, so callers
+    can run this alongside a translation call instead of waiting on it first."""
+    for polygon in polygons:
+        blur_region(image, polygon, blur_kernel=blur_kernel)
+    return image
+
+
 def process_image_array(
     image: np.ndarray,
     polygons: list[Polygon],
@@ -250,8 +262,8 @@ def process_image_array(
     text directly on an in-memory BGR image (e.g. a captured camera frame).
     The image is modified in-place and returned.
     """
+    remove_text_from_regions(image, polygons, blur_kernel=blur_kernel)
     for polygon, translated in zip(polygons, translated_texts):
-        blur_region(image, polygon, blur_kernel=blur_kernel)
         overlay_text(image, polygon, translated)
     return image
 

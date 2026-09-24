@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from OCR.google_vision import build_vision_engine, run_google_vision_ocr_array
 from translation.translator import translate_texts
-from blur_and_overlay.processor import process_image_array
+from blur_and_overlay.processor import overlay_text, remove_text_from_regions
 
 
 def _region_bounds(region) -> tuple[float, float, float, float]:
@@ -101,19 +102,23 @@ class TranslationPipeline:
             return frame_bgr.copy(), 0.0
 
         phrase_regions = _merge_phrase_regions(regions)
-
-        translated_texts = translate_texts(
-            [region.text for region in phrase_regions],
-            target_lang=target_lang,
-            source_lang=ocr_lang if ocr_lang != target_lang else None,
-        )
-
+        polygons = [region.polygon for region in phrase_regions]
         result_image = frame_bgr.copy()
-        process_image_array(
-            result_image,
-            polygons=[region.polygon for region in phrase_regions],
-            translated_texts=translated_texts,
-        )
+
+        # Translation (network call) and text removal (local blur) don't depend on
+        # each other, so run them concurrently instead of one after the other.
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            translate_future = executor.submit(
+                translate_texts,
+                [region.text for region in phrase_regions],
+                target_lang=target_lang,
+                source_lang=ocr_lang if ocr_lang != target_lang else None,
+            )
+            remove_text_from_regions(result_image, polygons)
+            translated_texts = translate_future.result()
+
+        for polygon, translated in zip(polygons, translated_texts):
+            overlay_text(result_image, polygon, translated)
 
         avg_confidence = sum(region.confidence for region in regions) / len(regions) * 100
         return result_image, avg_confidence
