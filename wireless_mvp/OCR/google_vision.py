@@ -48,6 +48,11 @@ def build_vision_engine() -> Any:
         return None
 
 
+def warm_up_engine() -> bool:
+    """Build the cached Vision client now so the channel/auth cost isn't paid by the first request."""
+    return build_vision_engine() is not None
+
+
 def _polygon(vertices: Any) -> list[list[float]]:
     return [[float(vertex.x), float(vertex.y)] for vertex in vertices]
 
@@ -148,7 +153,9 @@ def _run_vision_ocr(engine: Any, content: bytes, language: str) -> list[TextRegi
     image = vision.Image(content=content)
     context = vision.ImageContext(language_hints=[language]) if language else None
     try:
-        response = engine.document_text_detection(image=image, image_context=context)
+        # Bound the call instead of relying on the client's much longer default deadline,
+        # so a stalled request fails fast into the REST fallback below.
+        response = engine.document_text_detection(image=image, image_context=context, timeout=15)
         return _regions_from_response(response)
     except Exception:
         return _run_vision_with_gcloud_token(content, language)

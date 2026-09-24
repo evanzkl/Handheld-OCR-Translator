@@ -45,6 +45,15 @@ def _translation_client() -> Any:
     )
 
 
+def warm_up_client() -> bool:
+    """Build the cached Translation client now so the channel/auth cost isn't paid by the first request."""
+    try:
+        _translation_client()
+        return True
+    except Exception:
+        return False
+
+
 def _translate_with_gcloud_access_token(
     contents: list[str],
     target_lang: str,
@@ -143,7 +152,9 @@ def translate_texts(
         }
         if source_lang:
             req["source_language_code"] = source_lang
-        response = client.translate_text(request=req)
+        # Bound the call instead of relying on the client's much longer default deadline,
+        # so a stalled request fails fast into the REST fallback below.
+        response = client.translate_text(request=req, timeout=15)
         translated_values = [result.translated_text for result in response.translations]
     except Exception:
         translated_values = _translate_with_gcloud_access_token(

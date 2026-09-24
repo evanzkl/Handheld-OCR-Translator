@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from gui.languages import LANGUAGES, language_by_display_name  # noqa: E402
 from gui.pipeline import TranslationPipeline  # noqa: E402
+from OCR.google_vision import warm_up_engine  # noqa: E402
+from translation.translator import warm_up_client  # noqa: E402
 
 from .schemas import (  # noqa: E402
     JobCreateRequest,
@@ -28,6 +30,13 @@ from .schemas import (  # noqa: E402
 )
 
 app = FastAPI(title="Handheld OCR Translator API", version="1.0.0")
+
+
+@app.on_event("startup")
+def _warm_up_google_clients() -> None:
+    """Build the Vision/Translation gRPC clients now, not on the first request."""
+    warm_up_engine()
+    warm_up_client()
 
 # Allow a local Flutter web dev server (served from a different port) to call this API.
 app.add_middleware(
