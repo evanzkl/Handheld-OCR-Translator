@@ -1,1 +1,0 @@
-# Handheld-OCR-Translator
