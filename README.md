@@ -35,23 +35,23 @@ Legacy/earlier stages of the project (see [Section 5](#5-building-process)) also
 ```mermaid
 flowchart LR
     subgraph ESP32["Freenove ESP32-S3"]
-        BTN[Push Button - GPIO 21]
-        CAM[Camera + MJPEG Stream]
+        BTN["Push Button - GPIO 21"]
+        CAM["Camera + MJPEG Stream"]
     end
 
-    FE[Frontend<br/>Flutter Web]
-    BE[Backend<br/>FastAPI]
-    GAPI[Google API<br/>Vision OCR + Translate v3]
+    FE["Frontend - Flutter Web"]
+    BE["Backend - FastAPI"]
+    GAPI["Google API - Vision OCR + Translate v3"]
 
-    CAM -- "MJPEG live view (:81/stream)" --> FE
-    BTN -- "button press event<br/>(/button_event, polled)" --> FE
-    FE -- "/api/v1/jobs (create job)" --> BE
-    FE -- "/upload_job (trigger capture)" --> CAM
-    CAM -- "captured JPEG" --> BE
-    FE -- "/api/process (upload picked image)" --> BE
-    BE -- "OCR + translate request" --> GAPI
-    GAPI -- "detected text + translated text" --> BE
-    BE -- "blurred + overlaid result image + accuracy" --> FE
+    CAM -->|"MJPEG live view (:81/stream)"| FE
+    BTN -->|"button press event (/button_event, polled)"| FE
+    FE -->|"/api/v1/jobs (create job)"| BE
+    FE -->|"/upload_job (trigger capture)"| CAM
+    CAM -->|"captured JPEG"| BE
+    FE -->|"/api/process (upload picked image)"| BE
+    BE -->|"OCR + translate request"| GAPI
+    GAPI -->|"detected text + translated text"| BE
+    BE -->|"blurred + overlaid result image + accuracy"| FE
 ```
 
 ## 4. How to Use the Project
