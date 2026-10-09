@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-Handheld OCR Translator is a camera-based tool that captures an image of printed text, detects and translates it, and renders the translated text back on top of the original image (with the source text blurred out). Its purpose is to provide real-time, on-device-triggered translation of signs, labels, and documents without manually retyping text into a translation app. The current prototype (`wireless_mvp/`) is built around a **Freenove ESP32-S3** camera board that streams live video and captures stills over Wi-Fi to a FastAPI backend, controlled from a Flutter frontend and/or a physical push button wired to the board.
+Handheld OCR Translator is a camera-based tool that captures an image of printed text, detects and translates it, and renders the translated text back on top of the original image (with the source text blurred out). Its purpose is to provide real-time, on-device-triggered translation of signs, labels, and documents without manually retyping text into a translation app. The current prototype (`wireless_mvp/`) is built around a **Freenove ESP32-S3** camera board that streams live video and captures stills over Wi-Fi to a FastAPI backend, controlled from a Flutter frontend or a physical push button wired to the board.
 
 ## 2. Technologies Used
 
@@ -60,7 +60,7 @@ flowchart LR
 
 - Python 3.9+ with the packages in [wireless_mvp/backend/requirements.txt](wireless_mvp/backend/requirements.txt)
 - Flutter SDK ≥ 3.19 / Dart SDK ≥ 3.3 (see [pubspec.yaml](wireless_mvp/frontend/pubspec.yaml))
-- [PlatformIO](https://platformio.org/) (for building/uploading the firmware)
+- [PlatformIO](https://platformio.org/) 
 - A Google Cloud project with the Vision and Translation APIs enabled, authenticated via Application Default Credentials (`gcloud auth application-default login`) or a `GOOGLE_APPLICATION_CREDENTIALS` service account key
 
 ### Install & run the backend
@@ -103,12 +103,6 @@ Press **Apply**. Both values are saved to this browser's local storage ([home_sc
 3. On boot, the ESP32 tries to join `WIFI_SSID` for up to 20 seconds. If that fails, it falls back to broadcasting its own access point (`AP_SSID`/`AP_PASSWORD`, default `"ESP32-Camera"` / `"camera123"`) that you can connect to directly — see [firmware/src/main.cpp](wireless_mvp/firmware/src/main.cpp).
 4. The serial monitor (115200 baud) prints the resulting IP address to enter into the frontend's ESP32 camera URL field.
 
-### How the hardware functions
-
-- The camera (ESP32-S3-EYE sensor profile) streams MJPEG on port 81 and serves still captures / job uploads / button-event polling on port 80 ([app_httpd.cpp](wireless_mvp/firmware/src/app_httpd.cpp)).
-- A physical push button is wired to GPIO 21 (`INPUT_PULLUP`, so the button should connect GPIO 21 to GND when pressed); firmware debounces it in software (50 ms) and exposes the press as `capture_requested` via `/button_event`, polled every 250 ms by the frontend.
-- Circuit/wiring diagram: **[TODO — no schematic/wiring diagram file found in the repository]**.
-
 ### Operating the device
 
 1. Start the backend and frontend as above, and power on the ESP32.
@@ -127,16 +121,12 @@ Press **Apply**. Both values are saved to this browser's local storage ([home_sc
 
 ## 6. Personal Learnings & Challenges
 
-- **Image processing methods**: Getting the blur-and-overlay step to look right took more iteration than I expected — fitting translated text into the original text's bounding box while keeping it readable required dynamically scaling font size and line-wrapping rather than using a fixed font. I also learned the hard way that Pillow silently renders unsupported glyphs as blank boxes, so font selection has to be driven by actually detecting the script of the text, not just the declared language code.
-- **OCR**: Moving from a locally-run model (PaddleOCR on CPU/Jetson GPU) to a cloud OCR API (Google Vision) simplified the embedded side enormously but introduced new considerations, like handling network latency/variance and designing a fallback path for when the primary API call fails.
-- **User interface development**: Building the UI twice — once in Tkinter for the laptop/Jetson prototype and once in Flutter for the wireless version — taught me how much state management (live view vs. frozen vs. result vs. picked-image) matters for a camera-driven app, and how useful it is to keep both frontends' layout/behavior conceptually mirrored to simplify the rewrite.
-- **Soldering/electronics**: Wiring a physical push button to a microcontroller GPIO pin and getting reliable debounced input (first on Jetson, later on the ESP32) was a good reminder that small hardware details — pull-up resistors, debounce timing, which GPIO is safe to use at boot — can cause problems that look like software bugs at first.
+- **Image processing methods**: Getting the blur and overlay step to look right took more iteration than I expected as it required fitting translated text into the original text's bounding box while keeping it readable required dynamically scaling font size and line-wrapping rather than using a fixed font. 
+- **OCR**: Moving from a locally-run model (PaddleOCR on CPU/Jetson GPU) to a cloud OCR API (Google Vision) simplified the embedded side enormously but introduced new considerations, including handling network latency/variance and designing a fallback path for when the primary API call fails.
+- **User interface development**: Building the UI twice (once in Tkinter for the laptop/Jetson prototype and once in Flutter for the wireless version) taught me how much state management matters for a camera-driven app, and how useful it is to keep both frontends' layout/behavior conceptually mirrored to simplify the rewrite.
+- **Soldering/electronics**: Wiring a physical push button to a microcontroller GPIO pin and getting reliable debounced input was a good reminder that small hardware details can cause problems that look like software bugs at first. It was critical to first plan the wiring before soldering it onto the board.
 
 ## 7. Future Improvements
-
-Current implementation: cloud OCR/translation via Google APIs, Wi-Fi-based ESP32 camera with MJPEG streaming, Flutter web frontend, FastAPI backend, physical and on-screen capture triggers.
-
-Potential future improvements:
 
 - Proper right-to-left shaping/reshaping for Arabic text overlay (currently rendered without `arabic-reshaper`/`python-bidi`, so joined letterforms are not shaped).
 - Automatic discovery of the backend/ESP32 addresses (e.g. mDNS-based discovery) instead of manually entering IPs, beyond the current per-browser remembered-URL behavior.
