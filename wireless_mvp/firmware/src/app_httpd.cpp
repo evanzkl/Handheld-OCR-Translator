@@ -263,7 +263,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
         // JPEG encode runs on every stream frame, so trading some live-view
         // quality for encode speed is what actually restores smooth FPS here
         // (resolution can't be lowered - see capture_image() above).
-        bool jpeg_converted = frame2jpg(fb, 10, &_jpg_buf, &_jpg_buf_len);
+        bool jpeg_converted = frame2jpg(fb, 40, &_jpg_buf, &_jpg_buf_len);
         esp_camera_fb_return(fb);
         fb = NULL;
         if (!jpeg_converted) {
