@@ -213,4 +213,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 laptop_mvp/output
-wireless_mvp/frontend/android
+
+/wireless_mvp/frontend/android
