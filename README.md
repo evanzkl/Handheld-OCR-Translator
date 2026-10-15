@@ -2,7 +2,7 @@
 
 ## 1. Introduction
 
-Handheld OCR Translator is a camera-based tool that captures an image of printed text, detects and translates it, and renders the translated text back on top of the original image (with the source text blurred out). Its purpose is to provide real-time, on-device-triggered translation of signs, labels, and documents without manually retyping text into a translation app. The current prototype (`wireless_mvp/`) is built around a **Freenove ESP32-S3** camera board that streams live video and captures stills over Wi-Fi to a FastAPI backend, controlled from a Flutter frontend or a physical push button wired to the board.
+Handheld OCR Translator is a physical camera-based tool that captures an image of printed text, detects and translates it, and renders the translated text to the connected device. Its purpose is to provide real-time, on-device-triggered translation of signs, labels, and documents without manually retyping text into a translation app. The current prototype (`wireless_mvp/`) is built around a **Freenove ESP32-S3** camera board that streams live video and captures stills over Wi-Fi to a FastAPI backend, controlled from a Flutter frontend or a physical push button wired to the board.
 
 ## 2. Technologies Used
 
@@ -91,8 +91,6 @@ Open the Settings dialog and fill in Backend and ESP32 camera URLs.
 
 ## 7. Future Improvements
 
-- Proper right-to-left shaping/reshaping for Arabic text overlay (currently rendered without `arabic-reshaper`/`python-bidi`, so joined letterforms are not shaped).
-- Automatic discovery of the backend/ESP32 addresses (e.g. mDNS-based discovery) instead of manually entering IPs, beyond the current per-browser remembered-URL behavior.
-- A packaged/compiled desktop or mobile build of the Flutter frontend instead of `flutter run -d chrome` for end users.
+- Mobile build of flutter frontend
+- Automatic discovery of the backend/ESP32 addresses instead of manually entering IPs
 - Offline/on-device OCR fallback for when the ESP32 has no internet access to reach Google APIs.
-- Consolidating/removing the unused legacy `laptop_mvp`-derived code paths that are no longer part of the active ESP32 prototype.
