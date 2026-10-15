@@ -8,27 +8,21 @@ Handheld OCR Translator is a camera-based tool that captures an image of printed
 
 | Category | Technology |
 |---|---|
-| **APIs** | Google Cloud Vision API (`document_text_detection`, OCR) · Google Cloud Translation API v3 (`translate_text`) |
-| **Backend** | Python · FastAPI · Uvicorn |
-| **Frontend** | Flutter (Web, via `flutter run -d chrome`) · Dart |
-| **Firmware** | C++ (Arduino framework) · PlatformIO · ESP-IDF camera/HTTP server (`esp_camera`, `esp_http_server`) |
-| **Hardware** | Freenove ESP32-S3-WROOM camera board (`board = freenove_esp32_s3_wroom`), OV-series camera module (ESP32-S3-EYE profile), physical push button on GPIO 21 |
-| **Libraries / Packages** | `google-cloud-vision`, `google-cloud-translate`, `opencv-python` (`cv2`), `numpy`, `Pillow` (`PIL`), `pydantic` (via FastAPI) — backend; `http`, `file_picker`, `shared_preferences` — frontend (see [pubspec.yaml](wireless_mvp/frontend/pubspec.yaml)) |
-
-Legacy/earlier stages of the project (see [Section 5](#5-building-process)) also used **PaddleOCR**, **Tesseract**, and **Jetson.GPIO** — these remain in [laptop_mvp/](laptop_mvp/) but are not part of the current ESP32 prototype.
+| **Languages** | Python, Dart, C++ |
+| **APIs** | Google Cloud Vision API, Google Cloud Translation API v3 |
+| **Backend Framework** | FastAPI |
+| **Frontend Framework** | Flutter |
+| **Firmware** | PlatformIO |
+| **Hardware** | Freenove ESP32-S3-WROOM camera board, push button, slide switch, TPS61023 Boost Converter, 3.7 V Li-ion Battery |
+| **Libraries / Packages** | `google-cloud-vision`, `google-cloud-translate`, `opencv-python` (`cv2`), `numpy`, `Pillow`, `pydantic`, `file_picker`, `shared_preferences` |
 
 ## 3. Functions and Features
 
-- **Image capture**: Triggered three ways — the Flutter "Capture" button, the ESP32's physical push button (GPIO 21, debounced in firmware), or uploading an existing image file from disk. The ESP32 streams MJPEG live video (port 81, `/stream`) so the frontend always shows a live preview before capture.
-- **Image processing**: The backend ([blur_and_overlay/processor.py](wireless_mvp/backend/blur_and_overlay/processor.py)) Gaussian-blurs each detected text region (`cv2.GaussianBlur`) to obscure the original text, then overlays the translated text, auto-fitting font size/line-wrapping to the region's bounding box and picking a script-appropriate font (Han/Kana/Hangul/Arabic/Devanagari or Latin) so non-Latin scripts render correctly instead of as "tofu" boxes.
-- **OCR**: Google Cloud Vision's `document_text_detection` returns word-level polygons, text, and per-word confidence ([OCR/google_vision.py](wireless_mvp/backend/OCR/google_vision.py)). Adjacent words on the same line are merged into phrases ([gui/pipeline.py](wireless_mvp/backend/gui/pipeline.py)) before translation so phrases translate coherently rather than word-by-word.
-- **Translation**: Google Cloud Translation API v3 translates the merged phrases in a single batched request ([translation/translator.py](wireless_mvp/backend/translation/translator.py)), with a `gcloud`-token REST fallback if the primary gRPC client call fails.
-- **Communication between components**:
-  - Frontend ↔ Backend: HTTP/multipart (`/api/languages`, `/api/process`, `/api/v1/jobs`) — see [services/backend_client.dart](wireless_mvp/frontend/lib/services/backend_client.dart).
-  - Frontend ↔ ESP32: HTTP (`/button_event`, `/upload_job`) and MJPEG (`:81/stream`) — see [services/esp32_client.dart](wireless_mvp/frontend/lib/services/esp32_client.dart).
-  - ESP32 → Backend: the ESP32 itself uploads the captured JPEG directly to the backend job endpoint (not routed through Flutter) — see [firmware/src/app_httpd.cpp](wireless_mvp/firmware/src/app_httpd.cpp).
-- **Displayed OCR confidence score**: The "Accuracy" value shown in the UI is the **average per-word OCR confidence** reported by Google Vision for the captured image (not a measure of translation quality), computed in `TranslationPipeline.process()` and labeled "High/Medium/Low Confidence" in the UI based on thresholds (≥90%, ≥70%, below) — see `_confidenceLabel()` in [home_screen.dart](wireless_mvp/frontend/lib/screens/home_screen.dart).
-- **User interface / GUI**: A single-screen Flutter app showing the live camera feed (or a frozen/result image), language pickers with a swap button, Capture/Upload/Translate/Retake pill buttons, an FPS badge, a Settings dialog for the Backend/ESP32 URLs (remembered per-browser via `shared_preferences`), and a live-FPS/eye-toggle to hide the HUD.
+- **Image capture**: Triggered three ways — the Flutter "Capture" button, the ESP32's physical push button (GPIO 21, debounced in firmware), or uploading an existing image file from disk. The ESP32 streams MJPEG live video so the frontend always shows a live preview before capture.
+- **Image processing**: The backend Gaussian-blurs each detected text region to obscure the original text, then overlays the translated text, auto-fitting font size/line-wrapping to the region's bounding box and picking a script-appropriate font.
+- **OCR**: Google Cloud Vision's returns word-level polygons, text, and per-word confidence. Adjacent words on the same line are merged into phrases before translation so phrases translate coherently rather than word-by-word.
+- **Translation**: Google Cloud Translation API v3 translates the merged phrases in a single batched request.
+- **Displayed OCR confidence score**: The "Accuracy" value shown in the UI is the **average per-word OCR confidence** reported by Google Vision for the captured image (not a measure of translation quality).
 
 ### Data flow
 
@@ -56,13 +50,6 @@ flowchart LR
 
 ## 4. How to Use the Project
 
-### Required software
-
-- Python 3.9+ with the packages in [wireless_mvp/backend/requirements.txt](wireless_mvp/backend/requirements.txt)
-- Flutter SDK ≥ 3.19 / Dart SDK ≥ 3.3 (see [pubspec.yaml](wireless_mvp/frontend/pubspec.yaml))
-- [PlatformIO](https://platformio.org/) 
-- A Google Cloud project with the Vision and Translation APIs enabled, authenticated via Application Default Credentials (`gcloud auth application-default login`) or a `GOOGLE_APPLICATION_CREDENTIALS` service account key
-
 ### Install & run the backend
 
 ```powershell
@@ -70,8 +57,6 @@ cd wireless_mvp
 pip install -r backend/requirements.txt
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-
-`--host 0.0.0.0` is required so the ESP32 and the Flutter app can reach the backend over the LAN.
 
 ### Install & run the frontend
 
@@ -83,34 +68,12 @@ flutter run -d chrome
 
 ### Entering IP addresses in the frontend
 
-Open the Settings dialog (gear icon, top-right) and fill in:
-
-| Field | Value | Notes |
-|---|---|---|
-| Backend URL | This computer's LAN IP + port, e.g. `http://10.0.0.90:8000` | Never `localhost` — the ESP32 can't resolve that back to this machine |
-| ESP32 camera URL | The ESP32's IP or mDNS name, e.g. `http://esp32cam.local` or `http://192.168.1.60` | |
-
-Press **Apply**. Both values are saved to this browser's local storage ([home_screen.dart](wireless_mvp/frontend/lib/screens/home_screen.dart)) so they auto-fill on the next run of the app on the same machine; a brand-new machine still needs these entered once.
+Open the Settings dialog and fill in Backend and ESP32 camera URLs.
 
 ### Connecting the ESP32 to Wi-Fi
 
 1. Copy [firmware/include/wifi_credentials.example.h](wireless_mvp/firmware/include/wifi_credentials.example.h) to `firmware/include/wifi_credentials.h` (gitignored) and fill in `WIFI_SSID`/`WIFI_PASSWORD`.
-2. Build and upload with PlatformIO:
-   ```powershell
-   cd wireless_mvp/firmware
-   platformio run --target upload
-   ```
-3. On boot, the ESP32 tries to join `WIFI_SSID` for up to 20 seconds. If that fails, it falls back to broadcasting its own access point (`AP_SSID`/`AP_PASSWORD`, default `"ESP32-Camera"` / `"camera123"`) that you can connect to directly — see [firmware/src/main.cpp](wireless_mvp/firmware/src/main.cpp).
-4. The serial monitor (115200 baud) prints the resulting IP address to enter into the frontend's ESP32 camera URL field.
-
-### Operating the device
-
-1. Start the backend and frontend as above, and power on the ESP32.
-2. In the frontend, confirm the live view is streaming and both URLs are set.
-3. Pick source/target languages (swap button available).
-4. Capture via the **Capture** button, the physical push button, or **Upload Image** + **Translate** for an existing file.
-5. While processing, the last frame freezes with a "Processing..." overlay.
-6. The result image (blurred source text + translated overlay) displays along with the Accuracy and processing-time readout; press **Retake** to return to the live view.
+2. The serial monitor (115200 baud) prints the resulting IP address to enter into the frontend's ESP32 camera URL field.
 
 ## 5. Building Process
 
